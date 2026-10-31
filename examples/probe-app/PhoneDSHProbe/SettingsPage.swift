@@ -96,6 +96,17 @@ private struct NativeGeneralSettingsPage: View {
 
     var body: some View {
         List {
+            // 局域网电脑控制入口
+            Section {
+                NavigationLink {
+                    MCPSettingsPage()
+                } label: {
+                    Label(
+                        "局域网电脑控制（MCP）",
+                        systemImage: "desktopcomputer"
+                    )
+                }
+            }
             Section {
                 NavigationLink { PermissionDefaultsPage() } label: {
                     LabeledContent(NativeText("权限", "Permission"), value: permissionTitle)
