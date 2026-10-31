@@ -13,57 +13,32 @@ jobs:
     timeout-minutes: 120
 
     steps:
-
-      # 1. 下载 Phone DSH 源码
       - name: Checkout Phone DSH
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      # 2. 安装 Node.js
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      # 3. 配置 Xcode、Rust 和构建工具
-      - name: Setup build environment
+      - name: Setup build tools
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========== Xcode =========="
-
-          if [ -d "/Applications/Xcode_26.6.app/Contents/Developer" ]; then
-            sudo xcode-select -s \
-              /Applications/Xcode_26.6.app/Contents/Developer
-          elif [ -d "/Applications/Xcode_26.5.app/Contents/Developer" ]; then
-            sudo xcode-select -s \
-              /Applications/Xcode_26.5.app/Contents/Developer
+          if [ -d /Applications/Xcode_26.6.app/Contents/Developer ]; then
+            sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          elif [ -d /Applications/Xcode_26.5.app/Contents/Developer ]; then
+            sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
           fi
 
           xcodebuild -version
-          swift --version
-
-          echo "========== XcodeGen =========="
 
           if ! command -v xcodegen >/dev/null 2>&1; then
             brew install xcodegen
           fi
 
-          xcodegen --version
-
-          echo "========== Node.js =========="
-
-          node --version
-          npm --version
-
           corepack enable
-
-          echo "========== Rust =========="
-
-          rustc --version
-          cargo --version
 
           rustup target add \
             aarch64-apple-darwin \
@@ -71,154 +46,81 @@ jobs:
             aarch64-apple-ios-sim \
             wasm32-wasip1
 
-          echo "Build environment ready."
-
-      # 4. 获取指定版本的 DeepSeek Harness
-      - name: Download pinned DeepSeek Harness
+      - name: Download DeepSeek Harness
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========== Read version pin =========="
-
-          DSH_REPO=$(node -p \
-            "require('./plugins/dsh-pin.json').repo")
-
-          DSH_COMMIT=$(node -p \
-            "require('./plugins/dsh-pin.json').commit")
-
           DSH_DIR="$RUNNER_TEMP/deepseek-harness"
 
-          echo "Repository: $DSH_REPO"
-          echo "Commit: $DSH_COMMIT"
+          DSH_REPO=$(node -p "require('./plugins/dsh-pin.json').repo")
+          DSH_COMMIT=$(node -p "require('./plugins/dsh-pin.json').commit")
 
-          echo "========== Initialize repository =========="
-
-          mkdir -p "$DSH_DIR"
-
-          git -C "$DSH_DIR" init
-
+          git init "$DSH_DIR"
           git -C "$DSH_DIR" remote add origin "$DSH_REPO"
-
-          echo "========== Fetch pinned commit =========="
 
           git -C "$DSH_DIR" fetch \
             --no-tags \
             --depth=1 \
             origin "$DSH_COMMIT"
 
-          echo "========== Checkout commit =========="
-
           git -C "$DSH_DIR" checkout --detach FETCH_HEAD
 
-          echo "========== Verify commit =========="
+          ACTUAL=$(git -C "$DSH_DIR" rev-parse HEAD)
 
-          ACTUAL_COMMIT=$(git -C "$DSH_DIR" rev-parse HEAD)
-
-          echo "Expected: $DSH_COMMIT"
-          echo "Actual:   $ACTUAL_COMMIT"
-
-          if [ "$ACTUAL_COMMIT" != "$DSH_COMMIT" ]; then
-            echo "ERROR: DeepSeek Harness version mismatch."
-            exit 1
-          fi
-
+          test "$ACTUAL" = "$DSH_COMMIT"
           git -C "$DSH_DIR" cat-file -e 'HEAD^{tree}'
-
-          echo "DeepSeek Harness checkout verified."
 
           echo "PDSH_DSH_CHECKOUT=$DSH_DIR" >> "$GITHUB_ENV"
 
-      # 5. 安装并编译 DeepSeek Harness
       - name: Build DeepSeek Harness
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========== Install dependencies =========="
-
           cd "$PDSH_DSH_CHECKOUT"
 
-          pnpm --version
-
           pnpm install --frozen-lockfile
-
-          echo "========== Build DeepSeek Harness =========="
-
           pnpm build
 
-          echo "DeepSeek Harness build completed."
-
-      # 6. 安装 Phone DSH 插件依赖
-      - name: Install Phone DSH plugins
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd plugins
-
-          npm ci
-
-          cd ..
-
-          echo "========== Verify DSH checkout =========="
-
-          node plugins/scripts/dsh-checkout.mjs --verify
-
-          echo "Plugin dependencies ready."
-
-      # 7. 构建 Web Worker 资源
       - name: Build Worker assets
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========== Build Web distribution =========="
+          cd plugins
+          npm ci
+          cd ..
+
+          node plugins/scripts/dsh-checkout.mjs --verify
 
           bash scripts/ci/build-web-dist.sh \
             --source "$PDSH_DSH_CHECKOUT" \
             --store "$RUNNER_TEMP/pnpm-store"
 
-          echo "========== Copy Worker resources =========="
-
           bash examples/probe-app/scripts/copy-bundle-assets.sh \
             --checkout "$PDSH_DSH_CHECKOUT" \
             --force
 
-          echo "Worker assets completed."
-
-      # 8. 编译 Rust 原生工具
-      - name: Build native Rust shell
+      - name: Build native shell
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========== Build native shell =========="
-
           bash shell/build-apple.sh
-
-          echo "========== Verify XCFramework =========="
 
           test -d shell/dist/PDSHShell.xcframework
 
-          echo "Native shell completed."
-
-      # 9. 编译真实 iPhone App
       - name: Build iPhone App
         shell: bash
         env:
           PDSH_WITH_XZSHELL: '1'
-          PDSH_WITH_SHELL: '1'
         run: |
           set -euo pipefail
-
-          echo "========== Generate Xcode project =========="
 
           cd examples/probe-app
 
           xcodegen generate
-
-          echo "========== Build for physical iPhone =========="
 
           xcodebuild \
             -project PhoneDSHProbe.xcodeproj \
@@ -230,73 +132,28 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-          echo "iPhone App build completed."
-
-      # 10. 检查 App 是否生成
-      - name: Verify iPhone App
+      - name: Package IPA
         shell: bash
         run: |
           set -euo pipefail
 
           APP="$RUNNER_TEMP/phone-derived/Build/Products/Release-iphoneos/PhoneDSHProbe.app"
 
-          echo "========== Check App =========="
+          test -d "$APP"
 
-          if [ ! -d "$APP" ]; then
-            echo "ERROR: PhoneDSHProbe.app not found."
-            exit 1
-          fi
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
 
-          echo "App found."
+          ditto "$APP" \
+            "$RUNNER_TEMP/ipa/Payload/PhoneDSHProbe.app"
 
-          du -sh "$APP"
+          cd "$RUNNER_TEMP/ipa"
 
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$APP/Info.plist"
+          zip -qr "$RUNNER_TEMP/PhoneDSH-LAN-MCP.ipa" Payload
 
-          echo "App verification completed."
-
-      # 11. 生成未签名 IPA 安装包
-      - name: Package unsigned IPA
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "========== Package IPA =========="
-
-          APP="$RUNNER_TEMP/phone-derived/Build/Products/Release-iphoneos/PhoneDSHProbe.app"
-
-          IPA_DIR="$RUNNER_TEMP/phone-ipa"
-
-          mkdir -p "$IPA_DIR/Payload"
-
-          ditto \
-            "$APP" \
-            "$IPA_DIR/Payload/PhoneDSHProbe.app"
-
-          cd "$IPA_DIR"
-
-          zip -qr \
-            "$RUNNER_TEMP/PhoneDSH-unsigned.ipa" \
-            Payload
-
-          echo "========== Verify IPA =========="
-
-          test -f "$RUNNER_TEMP/PhoneDSH-unsigned.ipa"
-
-          unzip -t "$RUNNER_TEMP/PhoneDSH-unsigned.ipa" \
-            | tail -n 3
-
-          ls -lh "$RUNNER_TEMP/PhoneDSH-unsigned.ipa"
-
-          echo "IPA package created successfully."
-
-      # 12. 上传 IPA 到 GitHub Actions
-      - name: Upload Phone DSH IPA
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneDSH-unsigned
-          path: ${{ runner.temp }}/PhoneDSH-unsigned.ipa
+          name: PhoneDSH-LAN-MCP
+          path: ${{ runner.temp }}/PhoneDSH-LAN-MCP.ipa
           if-no-files-found: error
           retention-days: 7
