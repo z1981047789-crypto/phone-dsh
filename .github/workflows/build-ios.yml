@@ -1,0 +1,92 @@
+name: Build Phone DSH IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup tools
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+          brew install xcodegen
+          corepack enable
+          rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim wasm32-wasip1
+
+      - name: Build DeepSeek Harness
+        run: |
+          set -euo pipefail
+          git clone https://github.com/deepseek-ai/deepseek-harness.git "$RUNNER_TEMP/deepseek-harness"
+          git -C "$RUNNER_TEMP/deepseek-harness" checkout 7be5505b0be06009d74891c869063c9cf19a0df0
+          (
+            cd "$RUNNER_TEMP/deepseek-harness"
+            pnpm install --frozen-lockfile
+            pnpm build
+          )
+          echo "PDSH_DSH_CHECKOUT=$RUNNER_TEMP/deepseek-harness" >> "$GITHUB_ENV"
+
+      - name: Build Worker assets
+        run: |
+          set -euo pipefail
+          cd plugins
+          npm ci
+          cd ..
+          node plugins/scripts/dsh-checkout.mjs --verify
+          bash scripts/ci/build-web-dist.sh \
+            --source "$PDSH_DSH_CHECKOUT" \
+            --store "$RUNNER_TEMP/pnpm-store"
+          bash examples/probe-app/scripts/copy-bundle-assets.sh \
+            --checkout "$PDSH_DSH_CHECKOUT" --force
+
+      - name: Build native shell
+        run: |
+          bash shell/build-apple.sh
+
+      - name: Build iPhone App
+        env:
+          PDSH_WITH_XZSHELL: '1'
+        run: |
+          set -euo pipefail
+          cd examples/probe-app
+          xcodegen generate
+          xcodebuild \
+            -project PhoneDSHProbe.xcodeproj \
+            -scheme PhoneDSHProbe \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/phone-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/phone-derived/Build/Products/Release-iphoneos/PhoneDSHProbe.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$APP" "$RUNNER_TEMP/ipa/Payload/PhoneDSHProbe.app"
+          cd "$RUNNER_TEMP/ipa"
+          zip -qr "$RUNNER_TEMP/PhoneDSH-unsigned.ipa" Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneDSH-unsigned
+          path: ${{ runner.temp }}/PhoneDSH-unsigned.ipa
+          if-no-files-found: error
