@@ -178,22 +178,6 @@ struct NativeShell: View {
         // never depend on taps or swipes. Names match docs/screen-inventory.md.
         .fullScreenCover(item: $preview) { screen in
             NavigationStack { screen.body }
-                // The review cover has no way back by construction (each screen
-                // is the root of its own stack); this dismiss button keeps the
-                // screenshot pass from looking like a set of dead ends.
-                .overlay(alignment: .topLeading) {
-                    Button {
-                        preview = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .accessibilityLabel("关闭预览")
-                }
         }
         #endif
         #if DEBUG
@@ -750,8 +734,20 @@ enum PreviewScreen: String, Identifiable, CaseIterable {
     case settingsNetwork = "settings.network"
     case settingsPlugins = "settings.plugins"
     case settingsPermissions = "settings.permissions"
+    case settingsPermissionsTab = "settings.permissions.tab"
     case settingsAbout = "settings.about"
     case settingsRuntime = "settings.runtime"
+    case filesPreviewText = "files.preview.text"
+    case filesPreviewMarkdown = "files.preview.markdown"
+    case filesPreviewHTML = "files.preview.html"
+    case filesPreviewChat = "files.preview.chat"
+    case filesPreviewFiles = "files.preview.files"
+    case filesPreviewLong = "files.preview.long"
+    case filesPreviewPDF = "files.preview.pdf"
+    case filesPreviewImage = "files.preview.image"
+    case filesPreviewOffice = "files.preview.office"
+    case filesPreviewAudio = "files.preview.audio"
+    case filesPreview3D = "files.preview.3d"
     case sessions
     case sessionsSchedules = "sessions.schedules"
     case workspace
@@ -793,8 +789,34 @@ enum PreviewScreen: String, Identifiable, CaseIterable {
         case .settingsNetwork: EgressAllowListPage()
         case .settingsPlugins: NativeConfigurationPage()
         case .settingsPermissions: PhonePermissionsPage(preview: true)
+        case .settingsPermissionsTab: SettingsPage(initialTab: .permissions)
         case .settingsAbout: SettingsAboutPage()
         case .settingsRuntime: RuntimeDetailsPage(model: ChatModel.shared)
+        case .filesPreviewText:
+            PreviewDebugRoute(path: "preview-fixtures/notes.txt",
+                              text: "第一行：预览已经可以直接从会话打开。\n第二行：长文本会分页加载，不再只显示 200 行。\n第三行：关闭一次就能回到来源。\n")
+        case .filesPreviewMarkdown:
+            PreviewDebugRoute(path: "preview-fixtures/notes.md",
+                              text: "# 预览验收\n\n这是 Markdown 预览。\n\n- 直接打开，不经过文件列表\n- 深色模式可读\n\n```swift\nlet preview = true\n```\n")
+        case .filesPreviewHTML:
+            PreviewDebugRoute(path: "preview-fixtures/page.html",
+                              text: "<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{font:16px -apple-system;padding:24px;background:#fff;color:#111}h1{font-size:28px}</style><h1>HTML 预览</h1><p id=\"s\">JavaScript 未运行。</p><script>document.getElementById('s').textContent='JavaScript 已运行 · '+(1+1);</script>")
+        case .filesPreviewChat:
+            PreviewDebugChat(path: "preview-fixtures/notes.txt")
+        case .filesPreviewFiles:
+            PreviewDebugFiles(path: "preview-fixtures/notes.md")
+        case .filesPreviewLong:
+            PreviewDebugLong(path: "preview-fixtures/long.log")
+        case .filesPreviewPDF:
+            PreviewDebugPDF(path: "preview-fixtures/sample.pdf")
+        case .filesPreviewImage:
+            PreviewDebugImage(path: "preview-fixtures/sample.png")
+        case .filesPreviewOffice:
+            PreviewDebugOffice(path: "preview-fixtures/sample.rtf")
+        case .filesPreviewAudio:
+            PreviewDebugAudio(path: "preview-fixtures/sample.wav")
+        case .filesPreview3D:
+            PreviewDebug3D(path: "preview-fixtures/cube.glb")
         case .sessions: SessionsPage(onSelect: {})
         case .sessionsSchedules: NativeAutomationPage()
         case .workspace: WorkspaceFoldersPage()
