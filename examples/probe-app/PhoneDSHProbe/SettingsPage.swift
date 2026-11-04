@@ -69,15 +69,26 @@ struct SettingsPage: View {
                     NativeConfigurationPage()
                 }
             }
+Section(NativeText("权限与隐私", "Permissions and privacy")) {
+    link(NativeText("新会话默认权限", "Default permission"), icon: "lock.shield",
+         value: permissionTitle) {
+        PermissionDefaultsPage()
+    }
 
-            Section(NativeText("权限与隐私", "Permissions and privacy")) {
-                link(NativeText("新会话默认权限", "Default permission"), icon: "lock.shield",
-                     value: permissionTitle) { PermissionDefaultsPage() }
-                link(NativeText("手机权限", "Phone permissions"), icon: "hand.raised",
-                     value: phonePermissionSummary) { PhonePermissionsPage(embedded: true) }
-                link(NativeText("网络访问", "Network access"), icon: "network") { EgressAllowListPage() }
-                link(NativeText("MCP 服务器与密钥", "MCP Servers & Keys"), icon: "desktopcomputer") { MCPSettingsPage()}
-            }
+    link(NativeText("手机权限", "Phone permissions"), icon: "hand.raised",
+         value: phonePermissionSummary) {
+        PhonePermissionsPage(embedded: true)
+    }
+
+    link(NativeText("网络访问", "Network access"), icon: "network") {
+        EgressAllowListPage()
+    }
+
+    link(NativeText("MCP 服务器与密钥", "MCP servers and keys"),
+         icon: "desktopcomputer") {
+        MCPSettingsPage()
+    }
+}
 
             Section(NativeText("对话", "Conversation")) {
                 Picker(selection: Binding(get: { preferences.appearance },
