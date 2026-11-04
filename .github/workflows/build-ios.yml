@@ -1,0 +1,159 @@
+name: Build Phone DSH IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build iPhone IPA
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Phone DSH
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -d /Applications/Xcode_26.6.app/Contents/Developer ]; then
+            sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          elif [ -d /Applications/Xcode_26.5.app/Contents/Developer ]; then
+            sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          fi
+
+          xcodebuild -version
+
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+          corepack enable
+
+          rustup target add \
+            aarch64-apple-darwin \
+            aarch64-apple-ios \
+            aarch64-apple-ios-sim \
+            wasm32-wasip1
+
+      - name: Download DeepSeek Harness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DSH_DIR="$RUNNER_TEMP/deepseek-harness"
+
+          DSH_REPO=$(node -p "require('./plugins/dsh-pin.json').repo")
+          DSH_COMMIT=$(node -p "require('./plugins/dsh-pin.json').commit")
+
+          git init "$DSH_DIR"
+          git -C "$DSH_DIR" remote add origin "$DSH_REPO"
+
+          git -C "$DSH_DIR" fetch \
+            --no-tags \
+            --depth=1 \
+            origin "$DSH_COMMIT"
+
+          git -C "$DSH_DIR" checkout --detach FETCH_HEAD
+
+          ACTUAL=$(git -C "$DSH_DIR" rev-parse HEAD)
+
+          test "$ACTUAL" = "$DSH_COMMIT"
+          git -C "$DSH_DIR" cat-file -e 'HEAD^{tree}'
+
+          echo "PDSH_DSH_CHECKOUT=$DSH_DIR" >> "$GITHUB_ENV"
+
+      - name: Build DeepSeek Harness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PDSH_DSH_CHECKOUT"
+
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build Worker assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd plugins
+          npm ci
+          cd ..
+
+          node plugins/scripts/dsh-checkout.mjs --verify
+
+          bash scripts/ci/build-web-dist.sh \
+            --source "$PDSH_DSH_CHECKOUT" \
+            --store "$RUNNER_TEMP/pnpm-store"
+
+          bash examples/probe-app/scripts/copy-bundle-assets.sh \
+            --checkout "$PDSH_DSH_CHECKOUT" \
+            --force
+
+      - name: Build native shell
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bash shell/build-apple.sh
+
+          test -d shell/dist/PDSHShell.xcframework
+
+      - name: Build iPhone App
+        shell: bash
+        env:
+          PDSH_WITH_XZSHELL: '1'
+        run: |
+          set -euo pipefail
+
+          cd examples/probe-app
+
+          xcodegen generate
+
+          xcodebuild \
+            -project PhoneDSHProbe.xcodeproj \
+            -scheme PhoneDSHProbe \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/phone-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP="$RUNNER_TEMP/phone-derived/Build/Products/Release-iphoneos/PhoneDSHProbe.app"
+
+          test -d "$APP"
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+
+          ditto "$APP" \
+            "$RUNNER_TEMP/ipa/Payload/PhoneDSHProbe.app"
+
+          cd "$RUNNER_TEMP/ipa"
+
+          zip -qr "$RUNNER_TEMP/PhoneDSH-LAN-MCP.ipa" Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneDSH-LAN-MCP
+          path: ${{ runner.temp }}/PhoneDSH-LAN-MCP.ipa
+          if-no-files-found: error
+          retention-days: 7
